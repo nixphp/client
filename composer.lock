@@ -4,7 +4,7 @@
         "Read more about it at https://getcomposer.org/doc/01-basic-usage.md#installing-dependencies",
         "This file is @generated automatically"
     ],
-    "content-hash": "87975ad1b0640ecd98763fa87f2b6958",
+    "content-hash": "a23164a3cee9575c5c136b13858a8b4f",
     "packages": [
         {
             "name": "nixphp/framework",
