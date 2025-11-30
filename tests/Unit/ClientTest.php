@@ -4,7 +4,6 @@ declare(strict_types=1);
 
 namespace Tests\Unit;
 
-use NixPHP\Client\Exception\ClientException;
 use Nyholm\Psr7\Request;
 use NixPHP\Client\Core\Client;
 use NixPHP\Core\Config;
@@ -23,7 +22,8 @@ class ClientTest extends NixPHPTestCase
         $request = new Request('GET', '/test');
         $response = $client->sendRequest($request, function () {
             return [
-                'test', [
+                'test',
+                [
                     'HTTP/1.1 200 OK',
                     'Content-Type: text/plain'
                 ]
@@ -43,7 +43,8 @@ class ClientTest extends NixPHPTestCase
         $request = new Request('GET', '/test');
         $response = $client->sendRequest($request, function () {
             return [
-                'test', [
+                'test',
+                [
                     'HTTP/1.1 200 OK',
                     'Content-Type: text/plain'
                 ]
@@ -72,6 +73,27 @@ class ClientTest extends NixPHPTestCase
         $this->assertSame(200, $response->getStatusCode());
     }
 
+    public function testRequestWithFormatJSON()
+    {
+        $request = new Request('GET', '/test');
+        $request = $request->withHeader('Content-Type', 'application/json');
+
+        $client = new Client();
+        $response = $client->sendRequest($request, function () {
+            return [
+                ['test' => 'test'],
+                [
+                    'HTTP/1.1 200 OK',
+                    'Content-Type: application/json'
+                ]
+            ];
+        });
+
+        $this->assertInstanceOf(ResponseInterface::class, $response);
+        $this->assertJsonStringEqualsJsonString('{"test": "test"}', $response->getBody()->getContents());
+        $this->assertSame(200, $response->getStatusCode());
+    }
+
     public function testClientExceptionOnInvalidResponse()
     {
         $this->expectException(ClientExceptionInterface::class);
@@ -79,8 +101,25 @@ class ClientTest extends NixPHPTestCase
         $request = $request->withHeader('Content-Type', 'text/plain');
 
         $client = new Client();
-        $response = $client->sendRequest($request, function () {
+        $client->sendRequest($request, function () {
             throw new \Exception('Invalid response');
+        });
+    }
+
+    public function testClientExceptionOnMissingResponseStatusCode()
+    {
+        $this->expectException(ClientExceptionInterface::class);
+        $request = new Request('GET', '/test');
+        $request = $request->withHeader('Content-Type', 'text/plain');
+
+        $client = new Client();
+        $client->sendRequest($request, function () {
+            return [
+                'test', [
+                    '',
+                    'Content-Type: text/plain'
+                ]
+            ];
         });
     }
 

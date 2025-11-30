@@ -5,12 +5,13 @@ declare(strict_types=1);
 namespace NixPHP\Client\Core;
 
 use NixPHP\Client\Exception\ClientException;
-use Nyholm\Psr7\Response;
 use Psr\Http\Client\ClientInterface;
 use Psr\Http\Message\RequestInterface;
 use Psr\Http\Message\ResponseInterface;
 use Throwable;
 use function NixPHP\config;
+use function NixPHP\json;
+use function NixPHP\response;
 
 class Client implements ClientInterface
 {
@@ -51,20 +52,33 @@ class Client implements ClientInterface
             }
 
             if (null === $handler) {
-                $handler = function($url, $options) {
+                $handler = function($url, $options) use (&$http_response_header) {
                     $context = stream_context_create($options);
-                    $body = file_get_contents($url, false, $context);
+                    $body    = file_get_contents($url, false, $context);
+
+                    if ($body === false) {
+                        throw new \RuntimeException('HTTP request failed');
+                    }
+
                     return [$body, $http_response_header];
                 };
             }
 
             [$body, $responseHeadersRaw] = $handler($url, $options);
 
-            $statusLine = $responseHeadersRaw[0] ?? 'HTTP/1.1 200 OK';
+            if (!is_array($responseHeadersRaw)) {
+                throw new ClientException('Handler must return array with [body, headers]');
+            }
+
+            $statusLine = $responseHeadersRaw[0] ?? '';
             preg_match('#HTTP/\d+\.\d+\s+(\d+)#', $statusLine, $matches);
-            $status = (int)($matches[1] ?? 200);
+
+            if (!isset($matches[1])) {
+                throw new ClientException('Failed to parse HTTP status from response');
+            }
 
             $responseHeaders = [];
+            $status          = (int)($matches[1]);
 
             foreach ($responseHeadersRaw as $headerLine) {
                 if (str_contains($headerLine, ':')) {
@@ -73,7 +87,11 @@ class Client implements ClientInterface
                 }
             }
 
-            return new Response($status, $responseHeaders, $body);
+            if ($request->hasHeader('Content-Type') && in_array('application/json', $request->getHeader('Content-Type'))) {
+                return json($body, $status, $responseHeaders);
+            }
+
+            return response($body, $status, $responseHeaders);
         } catch (Throwable $t) {
             throw new ClientException($t->getMessage(), $t->getCode(), $t);
         }
