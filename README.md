@@ -92,7 +92,7 @@ This disables `verify_peer`, `verify_peer_name`, and allows self-signed certs.
 
 ## ✅ Requirements
 
-* `nixphp/framework` >= 1.0
+* `nixphp/framework` >= 0.1.0
 * `nyholm/psr7` >= 1.0 (used for PSR-7 implementation)
 
 ---

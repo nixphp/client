@@ -1,8 +1,13 @@
 <?php
 
+declare(strict_types=1);
+
+namespace NixPHP\Client;
+
+use NixPHP\Client\Core\Client;
 use function NixPHP\app;
 
-function client(): NixPHP\Client\Client
+function client(): Client
 {
-    return app()->container()->get('client');
+    return app()->container()->get(Client::class);
 }

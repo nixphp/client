@@ -1,13 +1,18 @@
 <?php
 
+declare(strict_types=1);
+
 namespace Tests\Unit;
 
+use NixPHP\Client\Exception\ClientException;
 use Nyholm\Psr7\Request;
-use NixPHP\Core\Client;
+use NixPHP\Client\Core\Client;
 use NixPHP\Core\Config;
+use Psr\Http\Client\ClientExceptionInterface;
 use Psr\Http\Message\ResponseInterface;
 use Tests\NixPHPTestCase;
 use function NixPHP\app;
+use function NixPHP\Client\client;
 
 class ClientTest extends NixPHPTestCase
 {
@@ -65,6 +70,23 @@ class ClientTest extends NixPHPTestCase
 
         $this->assertInstanceOf(ResponseInterface::class, $response);
         $this->assertSame(200, $response->getStatusCode());
+    }
+
+    public function testClientExceptionOnInvalidResponse()
+    {
+        $this->expectException(ClientExceptionInterface::class);
+        $request = new Request('GET', '/test');
+        $request = $request->withHeader('Content-Type', 'text/plain');
+
+        $client = new Client();
+        $response = $client->sendRequest($request, function () {
+            throw new \Exception('Invalid response');
+        });
+    }
+
+    public function testHelperFunction()
+    {
+        $this->assertInstanceOf(Client::class, client());
     }
 
 }
