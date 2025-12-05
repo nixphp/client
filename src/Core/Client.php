@@ -38,16 +38,16 @@ class Client implements ClientInterface
 
             $options = [
                 'http' => [
-                    'method'  => $method,
-                    'header'  => implode("\r\n", $headers),
-                    'content' => (string) $request->getBody(),
+                    'method'        => $method,
+                    'header'        => implode("\r\n", $headers),
+                    'content'       => (string) $request->getBody(),
                     'ignore_errors' => true
                 ]
             ];
 
             if (false === config('client:ssl_verify', true)) {
-                $options['ssl']['verify_peer'] = false;
-                $options['ssl']['verify_peer_name'] = false;
+                $options['ssl']['verify_peer']       = false;
+                $options['ssl']['verify_peer_name']  = false;
                 $options['ssl']['allow_self_signed'] = true;
             }
 
@@ -60,7 +60,7 @@ class Client implements ClientInterface
                         throw new \RuntimeException('HTTP request failed');
                     }
 
-                    return [$body, $http_response_header];
+                    return [$body, $http_response_header ?? []];
                 };
             }
 
@@ -93,7 +93,7 @@ class Client implements ClientInterface
 
             return response($body, $status, $responseHeaders);
         } catch (Throwable $t) {
-            throw new ClientException($t->getMessage(), $t->getCode(), $t);
+            throw new ClientException($t->getMessage(), (int)$t->getCode(), $t);
         }
     }
 }
