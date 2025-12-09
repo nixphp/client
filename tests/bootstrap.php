@@ -1,10 +1,12 @@
 <?php
 
+declare(strict_types=1);
+
 if (!defined('BASE_PATH')) {
     define('BASE_PATH', __DIR__ . '/Fixtures');
 }
 
-restore_error_handler();
-
 require_once __DIR__ . "/../vendor/autoload.php";
+require_once __DIR__ . "/../bootstrap.php";
+require_once __DIR__ . "/../src/functions.php";
 
