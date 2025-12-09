@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace Tests\Unit;
 
+use NixPHP\Client\Exception\ClientException;
 use Nyholm\Psr7\Request;
 use NixPHP\Client\Core\Client;
 use NixPHP\Core\Config;
@@ -102,7 +103,7 @@ class ClientTest extends NixPHPTestCase
 
         $client = new Client();
         $client->sendRequest($request, function () {
-            throw new \Exception('Invalid response');
+            throw new ClientException('Invalid response');
         });
     }
 
