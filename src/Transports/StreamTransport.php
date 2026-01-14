@@ -58,7 +58,7 @@ class StreamTransport implements TransportInterface
 
         // Streams may return body without headers in edge cases; normalize.
         if (count($headers) < 1) {
-            $headers = ['HTTP/1.1 200'];
+            throw new ClientException('HTTP response headers missing');
         }
 
         return [(string) $respBody, $headers];
