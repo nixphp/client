@@ -98,14 +98,14 @@ final class CurlTransport implements TransportInterface
         $versionString = match ($httpVersion) {
             CURL_HTTP_VERSION_1_0 => '1.0',
             CURL_HTTP_VERSION_1_1 => '1.1',
-            CURL_HTTP_VERSION_2_0, CURL_HTTP_VERSION_2 => '2',
+            CURL_HTTP_VERSION_2_0, CURL_HTTP_VERSION_2 => '2.0',
             //CURL_HTTP_VERSION_3 => '3',
             default => '1.1',
         };
         \curl_close($ch);
 
         // Provide a raw header array similar to $http_response_header.
-        $rawHeaders = array_merge([$versionString . ' ' . $status], $respHeaders);
+        $rawHeaders = array_merge(['HTTP/' . $versionString . ' ' . $status], $respHeaders);
 
         return [(string) $respBody, $rawHeaders];
     }
