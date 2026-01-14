@@ -4,6 +4,9 @@ declare(strict_types=1);
 
 namespace NixPHP\Client\Core;
 
+use NixPHP\Client\Transports\CurlTransport;
+use NixPHP\Client\Transports\StreamTransport;
+use NixPHP\Client\Transports\TransportInterface;
 use NixPHP\Client\Exception\ClientException;
 use Psr\Http\Client\ClientInterface;
 use Psr\Http\Message\RequestInterface;
@@ -14,81 +17,162 @@ use function NixPHP\response;
 
 class Client implements ClientInterface
 {
+    /** @var array<int,TransportInterface> */
+    private array $transports;
+
+    public function __construct(?array $transports = null)
+    {
+        // Prefer cURL, fallback to streams.
+        $this->transports = $transports ?? [
+            new CurlTransport(),
+            new StreamTransport(),
+        ];
+    }
+
+    public function sendRequest(RequestInterface $request): ResponseInterface
+    {
+        $cfg = (array) config('client', []);
+
+        $method = strtoupper($request->getMethod());
+        $url    = (string) $request->getUri();
+        $body   = (string) $request->getBody();
+
+        $retries      = (int)($cfg['retries'] ?? 1);          // additional attempts
+        $retryDelayMs = (int)($cfg['retry_delay_ms'] ?? 150);
+
+        $headerLines = $this->buildHeaderLines($request);
+
+        // Pre-resolve CA bundle once (transports just consume it).
+        $cfg['ca_bundle']    = $this->resolveCaBundlePath($cfg);
+        $cfg['http_version'] = (string)($cfg['http_version'] ?? 'auto'); // auto|1.1|2
+
+        $transport = $this->pickTransport();
+
+        $last = null;
+
+        // Attempt 0..retries
+        for ($attempt = 0; $attempt <= $retries; $attempt++) {
+            try {
+                [$respBody, $rawHeaders] = $transport->send($url, $method, $headerLines, $body, $cfg);
+                [$status, $headers]      = $this->parseHeaders($rawHeaders);
+
+                return response($respBody, $status, $headers);
+            } catch (\Throwable $e) {
+                $last = $e;
+
+                // Retry only for common transient TLS/network issues.
+                $msg = strtolower($e->getMessage());
+                $transient =
+                    str_contains($msg, 'failed to enable crypto') ||
+                    str_contains($msg, 'ssl') ||
+                    str_contains($msg, 'tls') ||
+                    str_contains($msg, 'handshake') ||
+                    str_contains($msg, 'timed out') ||
+                    str_contains($msg, 'connection reset');
+
+                if ($attempt < $retries && $transient) {
+                    if ($retryDelayMs > 0) {
+                        usleep($retryDelayMs * 1000);
+                    }
+                    continue;
+                }
+
+                throw new ClientException(
+                    'HTTP request failed: ' . $e->getMessage(),
+                    (int) $e->getCode(),
+                    $e
+                );
+            }
+        }
+
+        throw new ClientException('HTTP request failed', 0, $last);
+    }
+
+    private function pickTransport(): TransportInterface
+    {
+        // Default: first available
+        foreach ($this->transports as $t) {
+            if ($t->isAvailable()) {
+                return $t;
+            }
+        }
+
+        throw new ClientException('No HTTP transport available');
+    }
 
     /**
-     * @param RequestInterface $request
-     * @param callable|null    $handler
-     *
-     * @return ResponseInterface
-     * @throws ClientException
+     * @return array<int,string>
      */
-    public function sendRequest(RequestInterface $request, ?callable $handler = null): ResponseInterface
+    private function buildHeaderLines(RequestInterface $request): array
     {
-        $method  = strtoupper($request->getMethod());
-        $url     = (string)$request->getUri();
-        $headers = [];
+        $lines = [];
 
         foreach ($request->getHeaders() as $name => $values) {
             foreach ($values as $value) {
-                $headers[] = "$name: $value";
+                $lines[] = $name . ': ' . $value;
             }
         }
 
-        $options = [
-            'http' => [
-                'method'        => $method,
-                'header'        => implode("\r\n", $headers),
-                'content'       => (string)$request->getBody(),
-                'ignore_errors' => true
-            ]
-        ];
-
-        if (false === config('client:ssl_verify', true)) {
-            $options['ssl']['verify_peer']       = false;
-            $options['ssl']['verify_peer_name']  = false;
-            $options['ssl']['allow_self_signed'] = true;
+        // Ensure Host header exists (some environments are picky).
+        if (!$request->hasHeader('Host')) {
+            $host = $request->getUri()->getHost();
+            if ($host !== '') {
+                $lines[] = 'Host: ' . $host;
+            }
         }
 
-        if (null === $handler) {
-            $handler = function($url, $options) use (&$http_response_header) {
-                $context = stream_context_create($options);
-                $body    = file_get_contents($url, false, $context);
+        return $lines;
+    }
 
-                if ($body === false) {
-                    throw new ClientException('HTTP request failed');
-                }
-
-                return [$body, $http_response_header ?? []];
-            };
-        }
-
-        [$body, $responseHeadersRaw] = $handler($url, $options);
-
-        if (!is_array($responseHeadersRaw) || count($responseHeadersRaw) < 1) {
-            throw new ClientException('Handler must return array with [body, headers]');
-        }
-
-        $statusLine = $responseHeadersRaw[0] ?? '';
-        preg_match('#HTTP/\d+\.\d+\s+(\d+)#', $statusLine, $matches);
-
-        if (!isset($matches[1])) {
+    /**
+     * @param array<int,string> $raw
+     * @return array{0:int,1:array<string,array<int,string>>}
+     */
+    private function parseHeaders(array $raw): array
+    {
+        $statusLine = $raw[0] ?? '';
+        if (!preg_match('#HTTP/\d+\.\d+\s+(\d+)#i', $statusLine, $m)) {
             throw new ClientException('Failed to parse HTTP status from response');
         }
+        $status = (int) $m[1];
 
-        $responseHeaders = [];
-        $status          = (int)($matches[1]);
-
-        foreach ($responseHeadersRaw as $headerLine) {
-            if (str_contains($headerLine, ':')) {
-                [$name, $value] = explode(':', $headerLine, 2);
-                $responseHeaders[trim($name)][] = trim($value);
+        $headers = [];
+        foreach ($raw as $line) {
+            if (str_contains($line, ':')) {
+                [$name, $value] = explode(':', $line, 2);
+                $name  = trim($name);
+                $value = trim($value);
+                if ($name !== '') {
+                    $headers[$name][] = $value;
+                }
             }
         }
 
-        if (isset($responseHeaders['Content-Type']) && str_contains(implode(',', $responseHeaders['Content-Type']), 'application/json')) {
-            return json($body, $status, $responseHeaders);
+        return [$status, $headers];
+    }
+
+    private function resolveCaBundlePath(array $cfg): ?string
+    {
+        // 1) Explicitly configured
+        $cacert = $cfg['cacert'] ?? null;
+        if (is_string($cacert) && $cacert !== '' && is_file($cacert)) {
+            return $cacert;
         }
 
-        return response($body, $status, $responseHeaders);
+        // 2) Common locations across distros/images
+        $candidates = [
+            '/etc/ssl/certs/ca-certificates.crt', // Debian/Ubuntu/Alpine often
+            '/etc/ssl/cert.pem',                  // Alpine (some builds)
+            '/etc/pki/tls/certs/ca-bundle.crt',    // RHEL/CentOS
+            '/usr/local/share/certs/ca-root-nss.crt',
+        ];
+
+        foreach ($candidates as $path) {
+            if (is_file($path)) {
+                return $path;
+            }
+        }
+
+        return null;
     }
 }
